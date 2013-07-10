@@ -1,0 +1,50 @@
+--- nfc.c
++++ nfc.c
+@@ -563,12 +563,34 @@ s8 nfcReceptionTask()
+         
+         if (NFC_TASK_WAIT_FOR_EOF == nfcTaskStatus)
+         {
++            u8 fifoStatus[2];
+             u8 fifoReadSize;
+             
+-            err |= as3911ReadRegister(AS3911_REG_FIFO_RX_STATUS1, &fifoReadSize);
+-            as3911ReadFifo(nfcRxBufferInPtr, fifoReadSize);
++            err |= as3911ReadMultipleRegisters(AS3911_REG_FIFO_RX_STATUS1, &fifoStatus[0], 2);
++            
++            if (fifoStatus[1] & AS3911_REG_FIFO_RX_STATUS2_fifo_unf)
++            {
++                NFC_DEBUG("FIFO underflow during reception");
++                nfcRxError = ERR_FIFO;
++            }
++            else if (fifoStatus[1] & AS3911_REG_FIFO_RX_STATUS2_fifo_ovr)
++            {
++                NFC_DEBUG("FIFO overflow during reception");
++                nfcRxError = ERR_FIFO;
++            }
++            else if (fifoStatus[1] & (AS3911_REG_FIFO_RX_STATUS2_fifo_ncp | AS3911_REG_FIFO_RX_STATUS2_fifo_ncp))
++            {
++                nfcRxError = ERR_FRAMING;
++            }
++            else
++            {
++                u8 fifoReadSize = fifoStatus[0];
++                if (fifoReadSize > (sizeof(nfcRxBuffer) - (nfcRxBufferInPtr - nfcRxBuffer)))
++                {
++                    fifoReadSize = (sizeof(nfcRxBuffer) - (nfcRxBufferInPtr - nfcRxBuffer));
++                }
++                as3911ReadFifo(nfcRxBufferInPtr, fifoStatus[0]);
+             nfcRxBufferInPtr += fifoReadSize;
+-            nfcTaskStatus = NFC_TASK_RX_DONE;
+             
+             irqs = as3911GetInterrupt(AS3911_IRQ_MASK_CRC | AS3911_IRQ_MASK_PAR | AS3911_IRQ_MASK_ERR2 | AS3911_IRQ_MASK_ERR1);
+             if (irqs & AS3911_IRQ_MASK_CRC)
+@@ -581,7 +603,9 @@ s8 nfcReceptionTask()
+                 nfcRxError = ERR_FRAMING;
+             else
+                 nfcRxError = ERR_NONE;
++            }
+                 
++            nfcTaskStatus = NFC_TASK_RX_DONE;
+             
+             /* Stop NRE timer via a clear fifo cmd. */
+             as3911ExecuteCommand(AS3911_CMD_CLEAR_FIFO);
